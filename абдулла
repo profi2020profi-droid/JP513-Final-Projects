@@ -152,21 +152,6 @@ if __name__ == "__main__":
     main()
 
 
-class ValidationError(Exception):
-    def __init__(self, message: str):
-        self.message = message
-        super().__init__(self.message)
-
-
-class LimitExceededError(Exception):
-    def __init__(self, category: str, overspent_amount: float):
-        self.category = category
-        self.overspent_amount = overspent_amount
-        super().__init__(
-            f"Бюджет превышен. Вы вышли за из лимита по категории '{category}' "
-            f"на {overspent_amount:.2f} рублей!"
-        )
-
 
 from datetime import date
 
