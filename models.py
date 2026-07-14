@@ -1,0 +1,52 @@
+from datetime import date
+
+class Subscription:
+
+    def __init__(self, title: str, cost: float, category: str, next_billing_date: date, is_active: bool = True):
+        self.title = title
+        self.cost = cost
+        self.category = category
+        self.next_billing_date = next_billing_date
+        self.is_active = is_active
+
+    def get_days_left(self) -> int:
+        today = date.today()
+        delta = self.next_billing_date - today
+        return max(0, delta.days)
+
+    def to_dict(self) -> dict:
+        return {
+            "title": self.title,
+            "cost": self.cost,
+            "category": self.category,
+            "next_billing_date": self.next_billing_date.strftime("%Y-%m-%d"),
+            "is_active": self.is_active
+        }
+
+    def __str__(self) -> str:
+        status = "Активна" if self.is_active else "Приостановлена"
+        days_left = self.get_days_left()
+        return (
+            f"[{status}] {self.title} | {self.cost:.2f} руб. | Кат: {self.category} | "
+            f"Списание: {self.next_billing_date.strftime('%d.%m.%Y')} Осталось: {days_left} дн."
+        )
+
+
+class Expense:
+    def __init__(self, amount: float, category: str, date_fixed: date, description: str = ""):
+        self.amount = amount
+        self.category = category
+        self.date_fixed = date_fixed
+        self.description = description
+
+    def to_dict(self) -> dict:
+        return {
+            "amount": self.amount,
+            "category": self.category,
+            "date_fixed": self.date_fixed.strftime("%Y-%m-%d"),
+            "description": self.description
+        }
+
+    def __str__(self) -> str:
+        desc_str = f" ({self.description})" if self.description else ""
+        return f"{self.date_fixed.strftime('%d.%m.%Y')} {self.category}: {self.amount:.2f} руб.{desc_str}"

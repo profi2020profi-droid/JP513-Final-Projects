@@ -1,0 +1,152 @@
+from datetime import date, datetime
+from storage import StorageManager
+from exteptions import ValidationError, LimitExceededError
+
+
+def get_float_input(prompt: str) -> float:
+    while True:
+        try:
+            user_input = input(prompt).strip().replace(",", ".")
+            value = float(user_input)
+            return value
+        except ValueError:
+            print("Ошибка ввода! Пожалуйста, укажите число (например: 250 или 1200.50).")
+
+
+def get_date_input(prompt: str) -> date:
+    while True:
+        try:
+            user_input = input(prompt).strip()
+            return datetime.strptime(user_input, "%Y-%m-%d").date()
+        except ValueError:
+            print("Ошибка формата. Напишите дату по шаблону ГГГГ-ММ-ДД .")
+
+
+def main():
+    tracker = StorageManager.load()
+
+    billing_logs = tracker.process_auto_billings()
+    if billing_logs:
+        print("\n" + "=" * 50)
+        print("отчет банковского процесса")
+        print("=" * 50)
+        for log in billing_logs:
+            print(log)
+        print("=" * 50 + "\n")
+
+    while True:
+        print("-консольный финансовый месенджер-")
+        print(f"Текущий баланс: {tracker.balance:.2f} руб. | Безопасный остаток: {tracker.get_safe_balance():.2f} руб.")
+        print("1. Показать текущее состояние")
+        print("2. Добавить разовый расход")
+        print("3. Управление подписками, Добавить или Удалить или Включить")
+        print("4. Установить лимит на категорию")
+        print("5. Изменить/Пополнить баланс")
+        print("6. Выход")
+        print("-" * 38)
+
+        choice = input("Выберите пункт меню (1-6): ").strip()
+
+        if choice == "1":
+            print("\n- текущее состояние")
+            print(f"Баланс на счету: {tracker.balance:.2f} руб.")
+            print(f"Безопасный остаток : {tracker.get_safe_balance():.2f} руб.")
+            print("\nАктивные и приостановленные подписки:")
+            if not tracker.subscriptions:
+                print("   У вас нет добавленных подписок.")
+            else:
+                for idx, sub in enumerate(tracker.subscriptions, 1):
+                    print(f"  {idx}. {sub}")
+            print()
+
+        elif choice == "2":
+            print("\n-добавление одноразовго расхода")
+            amount = get_float_input("Введите сумму расхода (руб.): ")
+            category = input("Укажите категорию: ").strip()
+            description = input("Комментарий/Описание: ").strip()
+
+            try:
+                warning = tracker.add_expense(amount, category, description)
+                print("Расход успешно проведен!")
+                if warning:
+                    print(warning)
+            except (ValidationError, LimitExceededError) as err:
+                print(f"\nОтмена операции: {err}")
+            print()
+
+        elif choice == "3":
+            print("\n-управление подписками-")
+            print("1. Добавить новую подписку")
+            print("2. Удалить подписку из реестра")
+            print("3. Включить приостановленную подписку")
+            sub_choice = input("Выберите действие (1-3): ").strip()
+
+            if sub_choice == "1":
+                title = input("Название подписки (например, Спортзал): ").strip()
+                cost = get_float_input("Стоимость за период (руб.): ")
+                category = input("Категория (например, Здоровье): ").strip()
+                next_date = get_date_input("Дата следующего списания (YYYY-MM-DD): ")
+                try:
+                    tracker.add_subscription(title, cost, category, next_date)
+                    print(f"Подписка '{title}' поставлена на контроль.")
+                except ValidationError as ve:
+                    print(f"Ошибка: {ve}")
+
+            elif sub_choice == "2":
+                title = input("Введите название подписки для удаления: ").strip()
+                tracker.remove_subscription(title)
+                print(f"Операция завершена. Если подписка '{title}' существовала, она удалена.")
+
+            elif sub_choice == "3":
+                inactive_subs = [s for s in tracker.subscriptions if not s.is_active]
+                if not inactive_subs:
+                    print("У вас нет заблокированных подписок.")
+                else:
+                    for idx, s in enumerate(inactive_subs, 1):
+                        print(f"  {idx}. {s.title} — {s.cost:.2f} руб.")
+                    try:
+                        num = int(input("Введите номер для реактивации: "))
+                        if 1 <= num <= len(inactive_subs):
+                            target = inactive_subs[num - 1]
+                            target.is_active = True
+                            print(f"Подписка '{target.title}' успешно включена обратно.")
+                            new_logs = tracker.process_auto_billings()
+                            for log in new_logs:
+                                print(log)
+                        else:
+                            print("Неверный номер.")
+                    except ValueError:
+                        print("Ошибка ввода номера.")
+            print()
+
+        elif choice == "4":
+            print("\n- установка меяцчного лимита")
+            category = input("Введите название категории трат: ").strip()
+            amount = get_float_input(f"Укажите жесткий лимит для '{category}' (руб.): ")
+            try:
+                tracker.set_limits(category, amount)
+                print(f"Лимит для категории '{category}' зафиксирован на отметке {amount:.2f} руб.")
+            except ValidationError as ve:
+                print(f"Ошибка: {ve}")
+            print()
+
+        elif choice == "5":
+            print("\n- управление счетом-")
+            amount = get_float_input("Введите новую сумму на балансе (руб.): ")
+            try:
+                tracker.set_balance(amount)
+                print(f"Баланс успешно изменен. Доступно: {tracker.balance:.2f} руб.")
+            except ValidationError as ve:
+                print(f"Ошибка: {ve}")
+            print()
+
+        elif choice == "6":
+            StorageManager.save(tracker)
+            print("\nДанные сохранены в wallet.json. Сессия успешно закрыта!")
+            break
+        else:
+            print("Неверный выбор! Пожалуйста, укажите число от 1 до 6.\n")
+
+
+if __name__ == "__main__":
+    main()
