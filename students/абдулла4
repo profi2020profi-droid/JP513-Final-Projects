@@ -1,0 +1,61 @@
+
+
+
+import json
+import os
+from datetime import datetime
+from tracker import FinanceTracker
+from models import Subscription, Expense
+
+
+class StorageManager:
+    FILENAME = "wallet.json"
+
+    @classmethod
+    def load(cls) -> FinanceTracker:
+        if not os.path.exists(cls.FILENAME):
+            return FinanceTracker()
+
+        try:
+            with open(cls.FILENAME, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            tracker = FinanceTracker(balance=data.get("balance", 0.0))
+            tracker.limits = data.get("limits", {})
+
+            for sub_data in data.get("subscriptions", []):
+                billing_date = datetime.strptime(sub_data["next_billing_date"], "%Y-%m-%d").date()
+                sub = Subscription(
+                    title=sub_data["title"],
+                    cost=sub_data["cost"],
+                    category=sub_data["category"],
+                    next_billing_date=billing_date,
+                    is_active=sub_data["is_active"]
+                )
+                tracker.subscriptions.append(sub)
+
+            for exp_data in data.get("expenses", []):
+                expense_date = datetime.strptime(exp_data["date_fixed"], "%Y-%m-%d").date()
+                exp = Expense(
+                    amount=exp_data["amount"],
+                    category=exp_data["category"],
+                    date_fixed=expense_date,
+                    description=exp_data["description"]
+                )
+                tracker.expenses.append(exp)
+
+            return tracker
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            print(f"Предупреждение: Не удалось прочесть файл хранилища {e}. Запущен чистый профиль.")
+            return FinanceTracker()
+
+    @classmethod
+    def save(cls, tracker: FinanceTracker) -> None:
+        data = {
+            "balance": tracker.balance,
+            "limits": tracker.limits,
+            "subscriptions": [sub.to_dict() for sub in tracker.subscriptions],
+            "expenses": [exp.to_dict() for exp in tracker.expenses]
+        }
+        with open(cls.FILENAME, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
