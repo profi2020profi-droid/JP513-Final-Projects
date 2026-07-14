@@ -1,0 +1,407 @@
+class ValidationError(Exception):
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(self.message)
+
+
+class LimitExceededError(Exception):
+    def __init__(self, category: str, overspent_amount: float):
+        self.category = category
+        self.overspent_amount = overspent_amount
+        super().__init__(
+            f"Бюджет превышен. Вы вышли за из лимита по категории '{category}' "
+            f"на {overspent_amount:.2f} рублей!"
+        )
+
+
+from datetime import date, datetime
+from storage import StorageManager
+from exteptions import ValidationError, LimitExceededError
+
+
+def get_float_input(prompt: str) -> float:
+    while True:
+        try:
+            user_input = input(prompt).strip().replace(",", ".")
+            value = float(user_input)
+            return value
+        except ValueError:
+            print("Ошибка ввода! Пожалуйста, укажите число (например: 250 или 1200.50).")
+
+
+def get_date_input(prompt: str) -> date:
+    while True:
+        try:
+            user_input = input(prompt).strip()
+            return datetime.strptime(user_input, "%Y-%m-%d").date()
+        except ValueError:
+            print("Ошибка формата. Напишите дату по шаблону ГГГГ-ММ-ДД .")
+
+
+def main():
+    tracker = StorageManager.load()
+
+    billing_logs = tracker.process_auto_billings()
+    if billing_logs:
+        print("\n" + "=" * 50)
+        print("отчет банковского процесса")
+        print("=" * 50)
+        for log in billing_logs:
+            print(log)
+        print("=" * 50 + "\n")
+
+    while True:
+        print("-консольный финансовый месенджер-")
+        print(f"Текущий баланс: {tracker.balance:.2f} руб. | Безопасный остаток: {tracker.get_safe_balance():.2f} руб.")
+        print("1. Показать текущее состояние")
+        print("2. Добавить разовый расход")
+        print("3. Управление подписками, Добавить или Удалить или Включить")
+        print("4. Установить лимит на категорию")
+        print("5. Изменить/Пополнить баланс")
+        print("6. Выход")
+        print("-" * 38)
+
+        choice = input("Выберите пункт меню (1-6): ").strip()
+
+        if choice == "1":
+            print("\n- текущее состояние")
+            print(f"Баланс на счету: {tracker.balance:.2f} руб.")
+            print(f"Безопасный остаток : {tracker.get_safe_balance():.2f} руб.")
+            print("\nАктивные и приостановленные подписки:")
+            if not tracker.subscriptions:
+                print("   У вас нет добавленных подписок.")
+            else:
+                for idx, sub in enumerate(tracker.subscriptions, 1):
+                    print(f"  {idx}. {sub}")
+            print()
+
+        elif choice == "2":
+            print("\n-добавление одноразовго расхода")
+            amount = get_float_input("Введите сумму расхода (руб.): ")
+            category = input("Укажите категорию: ").strip()
+            description = input("Комментарий/Описание: ").strip()
+
+            try:
+                warning = tracker.add_expense(amount, category, description)
+                print("Расход успешно проведен!")
+                if warning:
+                    print(warning)
+            except (ValidationError, LimitExceededError) as err:
+                print(f"\nОтмена операции: {err}")
+            print()
+
+        elif choice == "3":
+            print("\n-управление подписками-")
+            print("1. Добавить новую подписку")
+            print("2. Удалить подписку из реестра")
+            print("3. Включить приостановленную подписку")
+            sub_choice = input("Выберите действие (1-3): ").strip()
+
+            if sub_choice == "1":
+                title = input("Название подписки (например, Спортзал): ").strip()
+                cost = get_float_input("Стоимость за период (руб.): ")
+                category = input("Категория (например, Здоровье): ").strip()
+                next_date = get_date_input("Дата следующего списания (YYYY-MM-DD): ")
+                try:
+                    tracker.add_subscription(title, cost, category, next_date)
+                    print(f"Подписка '{title}' поставлена на контроль.")
+                except ValidationError as ve:
+                    print(f"Ошибка: {ve}")
+
+            elif sub_choice == "2":
+                title = input("Введите название подписки для удаления: ").strip()
+                tracker.remove_subscription(title)
+                print(f"Операция завершена. Если подписка '{title}' существовала, она удалена.")
+
+            elif sub_choice == "3":
+                inactive_subs = [s for s in tracker.subscriptions if not s.is_active]
+                if not inactive_subs:
+                    print("У вас нет заблокированных подписок.")
+                else:
+                    for idx, s in enumerate(inactive_subs, 1):
+                        print(f"  {idx}. {s.title} — {s.cost:.2f} руб.")
+                    try:
+                        num = int(input("Введите номер для реактивации: "))
+                        if 1 <= num <= len(inactive_subs):
+                            target = inactive_subs[num - 1]
+                            target.is_active = True
+                            print(f"Подписка '{target.title}' успешно включена обратно.")
+                            new_logs = tracker.process_auto_billings()
+                            for log in new_logs:
+                                print(log)
+                        else:
+                            print("Неверный номер.")
+                    except ValueError:
+                        print("Ошибка ввода номера.")
+            print()
+
+        elif choice == "4":
+            print("\n- установка меяцчного лимита")
+            category = input("Введите название категории трат: ").strip()
+            amount = get_float_input(f"Укажите жесткий лимит для '{category}' (руб.): ")
+            try:
+                tracker.set_limits(category, amount)
+                print(f"Лимит для категории '{category}' зафиксирован на отметке {amount:.2f} руб.")
+            except ValidationError as ve:
+                print(f"Ошибка: {ve}")
+            print()
+
+        elif choice == "5":
+            print("\n- управление счетом-")
+            amount = get_float_input("Введите новую сумму на балансе (руб.): ")
+            try:
+                tracker.set_balance(amount)
+                print(f"Баланс успешно изменен. Доступно: {tracker.balance:.2f} руб.")
+            except ValidationError as ve:
+                print(f"Ошибка: {ve}")
+            print()
+
+        elif choice == "6":
+            StorageManager.save(tracker)
+            print("\nДанные сохранены в wallet.json. Сессия успешно закрыта!")
+            break
+        else:
+            print("Неверный выбор! Пожалуйста, укажите число от 1 до 6.\n")
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+from datetime import date
+
+class Subscription:
+
+    def __init__(self, title: str, cost: float, category: str, next_billing_date: date, is_active: bool = True):
+        self.title = title
+        self.cost = cost
+        self.category = category
+        self.next_billing_date = next_billing_date
+        self.is_active = is_active
+
+    def get_days_left(self) -> int:
+        today = date.today()
+        delta = self.next_billing_date - today
+        return max(0, delta.days)
+
+    def to_dict(self) -> dict:
+        return {
+            "title": self.title,
+            "cost": self.cost,
+            "category": self.category,
+            "next_billing_date": self.next_billing_date.strftime("%Y-%m-%d"),
+            "is_active": self.is_active
+        }
+
+    def __str__(self) -> str:
+        status = "Активна" if self.is_active else "Приостановлена"
+        days_left = self.get_days_left()
+        return (
+            f"[{status}] {self.title} | {self.cost:.2f} руб. | Кат: {self.category} | "
+            f"Списание: {self.next_billing_date.strftime('%d.%m.%Y')} Осталось: {days_left} дн."
+        )
+
+
+class Expense:
+    def __init__(self, amount: float, category: str, date_fixed: date, description: str = ""):
+        self.amount = amount
+        self.category = category
+        self.date_fixed = date_fixed
+        self.description = description
+
+    def to_dict(self) -> dict:
+        return {
+            "amount": self.amount,
+            "category": self.category,
+            "date_fixed": self.date_fixed.strftime("%Y-%m-%d"),
+            "description": self.description
+        }
+
+    def __str__(self) -> str:
+        desc_str = f" ({self.description})" if self.description else ""
+        return f"{self.date_fixed.strftime('%d.%m.%Y')} {self.category}: {self.amount:.2f} руб.{desc_str}"
+
+
+import json
+import os
+from datetime import datetime
+from tracker import FinanceTracker
+from models import Subscription, Expense
+
+
+class StorageManager:
+    FILENAME = "wallet.json"
+
+    @classmethod
+    def load(cls) -> FinanceTracker:
+        if not os.path.exists(cls.FILENAME):
+            return FinanceTracker()
+
+        try:
+            with open(cls.FILENAME, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            tracker = FinanceTracker(balance=data.get("balance", 0.0))
+            tracker.limits = data.get("limits", {})
+
+            for sub_data in data.get("subscriptions", []):
+                billing_date = datetime.strptime(sub_data["next_billing_date"], "%Y-%m-%d").date()
+                sub = Subscription(
+                    title=sub_data["title"],
+                    cost=sub_data["cost"],
+                    category=sub_data["category"],
+                    next_billing_date=billing_date,
+                    is_active=sub_data["is_active"]
+                )
+                tracker.subscriptions.append(sub)
+
+            for exp_data in data.get("expenses", []):
+                expense_date = datetime.strptime(exp_data["date_fixed"], "%Y-%m-%d").date()
+                exp = Expense(
+                    amount=exp_data["amount"],
+                    category=exp_data["category"],
+                    date_fixed=expense_date,
+                    description=exp_data["description"]
+                )
+                tracker.expenses.append(exp)
+
+            return tracker
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            print(f"Предупреждение: Не удалось прочесть файл хранилища {e}. Запущен чистый профиль.")
+            return FinanceTracker()
+
+    @classmethod
+    def save(cls, tracker: FinanceTracker) -> None:
+        data = {
+            "balance": tracker.balance,
+            "limits": tracker.limits,
+            "subscriptions": [sub.to_dict() for sub in tracker.subscriptions],
+            "expenses": [exp.to_dict() for exp in tracker.expenses]
+        }
+        with open(cls.FILENAME, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+
+import calendar
+from datetime import date
+from models import Subscription, Expense
+from exteptions import ValidationError, LimitExceededError
+
+
+class FinanceTracker:
+
+
+    def __init__(self, balance: float = 0.0):
+        self.balance = balance
+        self.limits: dict[str, float] = {}
+        self.subscriptions: list[Subscription] = []
+        self.expenses: list[Expense] = []
+
+    def set_balance(self, amount: float):
+        if amount <= 0:
+            raise ValidationError("Начальный баланс или же сумма депозита не должна быть отрицательной")
+        self.balance = amount
+
+    def set_limits(self, category: str, amount: float):
+        if not category.strip():
+            raise ValidationError("Название категории не может быть пустым")
+        if amount <= 0:
+            raise ValidationError("Лимит должен быть больше нуля")
+        self.limits[category.strip()] = amount
+
+    def add_subscription(self, title: str, cost: float, category: str, next_billing_date: date):
+        if not title.strip() or not category.strip():
+            raise ValidationError("Название подписки и категория не могут быть пустыми.")
+        if cost <= 0:
+            raise ValidationError("Цена подписки должна быть больше 0.")
+
+        new_sub = Subscription(title.strip(), cost, category.strip(), next_billing_date)
+        self.subscriptions.append(new_sub)
+
+    def remove_subscription(self, title: str):
+        self.subscriptions = [s for s in self.subscriptions if s.title.lower() != title.strip().lower()]
+
+    def get_safe_balance(self) -> float:
+        safe_balance = self.balance
+        for sub in self.subscriptions:
+            if sub.is_active and sub.get_days_left() <= 7:
+                safe_balance -= sub.cost
+        return safe_balance
+
+    def add_expense(self, amount: float, category: str, description: str = "", date_fixed: date = None) -> str | None:
+        if amount <= 0:
+            raise ValidationError("Сумма расхода должна быть больше нуля.")
+        if not category.strip():
+            raise ValidationError("Категория расхода не может быть пустой.")
+        if date_fixed is None:
+            date_fixed = date.today()
+
+        category = category.strip()
+
+        total_spent_before = sum(
+            a.amount for a in self.expenses
+            if a.category.lower() == category.lower()
+            and a.date_fixed.month == date_fixed.month
+            and a.date_fixed.year == date_fixed.year
+        )
+        total_spent_after = total_spent_before + amount
+
+        if self.balance < amount:
+            raise ValidationError(f"Недостаточно средств на балансе! Доступно: {self.balance:.2f} руб.")
+
+        matched_limit_key = next((k for k in self.limits if k.lower() == category.lower()), None)
+
+        if matched_limit_key:
+            limit = self.limits[matched_limit_key]
+            if total_spent_after > limit:
+                overspent = total_spent_after - limit
+                raise LimitExceededError(category=matched_limit_key, overspent_amount=overspent)
+
+            self.expenses.append(Expense(amount, matched_limit_key, date_fixed, description.strip()))
+            self.balance -= amount
+
+            if total_spent_after >= limit * 0.8:
+                return f"Внимание. Вы потратили 80% бюджета по категории {matched_limit_key}."
+            return ""
+
+        self.expenses.append(Expense(amount, category, date_fixed, description.strip()))
+        self.balance -= amount
+        return ""
+
+    def process_auto_billings(self) -> list[str]:
+        today = date.today()
+        logs = []
+
+        for sub in self.subscriptions:
+            if not sub.is_active:
+                continue
+
+            while sub.next_billing_date <= today and sub.is_active:
+                if self.balance >= sub.cost:
+                    self.balance -= sub.cost
+
+                    auto_expense = Expense(
+                        amount=sub.cost,
+                        category="Подписки",
+                        date_fixed=sub.next_billing_date,
+                        description=f"Автосписание: [{sub.title}]"
+                    )
+                    self.expenses.append(auto_expense)
+                    logs.append(
+                        f"Успешный платеж: Подписка '{sub.title}' оплачена ({sub.next_billing_date.strftime('%d.%m.%Y')}) на сумму {sub.cost:.2f} руб.")
+                    sub.next_billing_date = self._add_months(sub.next_billing_date, 1)
+                else:
+                    sub.is_active = False
+                    logs.append(
+                        f"Критическое предупреждение. Ошибка автосписания: подписка {sub.title} приостановлена. Недостаточно средств.")
+        return logs
+
+    @staticmethod
+    def _add_months(source_date: date, months: int) -> date:
+        month = source_date.month - 1 + months
+        year = source_date.year + month // 12
+        month = month % 12 + 1
+        day = min(source_date.day, calendar.monthrange(year, month))
+        return date(year, month, day)
